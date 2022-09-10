@@ -33,13 +33,16 @@ import pygame
 EASYCAP_VID = 0x1B71
 EASYCAP_PID = 0x3002
 
+EASYCAP_INTERFACE = 0
+
 
 class Utv007(object):
-    # The interface number of the EasyCAP device
-    # Should always be 0
-    interface = 0
-
     def __init__(self):
+        # This will select the device to use immidately,
+        # but we don't want to claim it until the user uses the with
+        # statement (__enter__) to guarantee that the device is released
+        # properly
+
         self.usb_context = usb.USBContext()
 
         self.device = None
@@ -56,26 +59,6 @@ class Utv007(object):
         if not self.device:
             raise Exception("No EasyCap found")
 
-        self.device_handle = self.device.open()
-
-        # Try to detach any kernel drivers
-        while self.device_handle.kernelDriverActive(self.interface):
-            print("Detaching kernel driver")
-            self.device_handle.detachKernelDriver(self.interface)
-            sleep(0.5)
-
-        print("Claiming interface")
-        self.device_handle.claimInterface(self.interface)
-
-        print("Preinit")
-        run_protocol(p_preinit, self.device_handle)
-        print("Init")
-        run_protocol(p_init, self.device_handle)
-        run_protocol(p5, self.device_handle)
-
-        print("Set Altsetting to 1")
-        self.device_handle.setInterfaceAltSetting(self.interface, 1)
-
         # packet related:
         self.expected_toggle = True
         self.expected_n_s_packet = 0
@@ -87,12 +70,31 @@ class Utv007(object):
         self.framebuffer = bytearray(720 * 480 * 2)  # 2 bytes per pixel
 
     def __enter__(self):
-        print("Enter")
+        self.device_handle = self.device.open()
+
+        # Try to detach any kernel drivers
+        while self.device_handle.kernelDriverActive(EASYCAP_INTERFACE):
+            print("Detaching kernel driver")
+            self.device_handle.detachKernelDriver(EASYCAP_INTERFACE)
+            sleep(0.5)
+
+        print("Claiming interface")
+        self.device_handle.claimInterface(EASYCAP_INTERFACE)
+
+        print("Preinit")
+        run_protocol(p_preinit, self.device_handle)
+        print("Init")
+        run_protocol(p_init, self.device_handle)
+        run_protocol(p5, self.device_handle)
+
+        print("Set Altsetting to 1")
+        self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
+
         return self
 
     def __exit__(self, type, value, traceback):
-        ## NOTE ATER DINNER: ERROR WITH THE PIL TOSTRING, NOT GETTING TORN DOWN PROPERLY
-        ## (With statements automatically call this on exception?)
+        # TODO: Threads are not being killed properly
+        
         print("Exit was called, releasing ISOs")
         for iso in self.iso:
             try:
