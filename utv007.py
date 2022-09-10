@@ -18,6 +18,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import division
+from __future__ import print_function
+from builtins import hex
+from builtins import range
+from builtins import object
+from past.utils import old_div
 import usb1 as usb
 from protocol import p_init, p5
 from protocol import *
@@ -32,30 +38,31 @@ class Utv007(object):
         
         easycap_dev_id = '0x1b71:0x3002'
         for i in self.cont.getDeviceList():
-            print "ID", i.getVendorID(),i.getProductID(), i.getManufacturer(), "Serial: ", i.getSerialNumber(), "Num conf", i.getNumConfigurations()
+            print("ID", i.getVendorID(),i.getProductID(), i.getManufacturer(), "Serial: ", i.getSerialNumber(), "Num conf", i.getNumConfigurations())
             if hex(i.getVendorID()) + ':' + hex(i.getProductID()) == easycap_dev_id:
-                print "Easycap utv007 found! Dev ID: ", easycap_dev_id
+                print("Easycap utv007 found! Dev ID: ", easycap_dev_id)
                 self.dev = i
                 break
         if self.dev:
-            print "Opening device"
+            print("Opening device")
             self.devh = self.dev.open()
+            #self.devh.controlWrite()
         else:
-            print "No easycap utv007 devices found"
+            print("No easycap utv007 devices found")
             exit()
 
         while self.devh.kernelDriverActive(self.interface):
             self.devh.detachKernelDriver(self.interface)
             sleep(0.5)
 
-        print "Claiming interface"
+        print("Claiming interface")
         self.devh.claimInterface(self.interface)
-        print "Preinit"
+        print("Preinit")
         run_protocol(p_preinit, self.devh)
-        print "Init"
+        print("Init")
         run_protocol(p_init, self.devh)
         run_protocol(p5, self.devh)
-        print "Set Altsetting to 1"
+        print("Set Altsetting to 1")
         self.devh.setInterfaceAltSetting(self.interface,1)
 
         #packet related:
@@ -69,20 +76,23 @@ class Utv007(object):
         self.framebuffer         = bytearray(720 * 480 * 2) # 2 bytes per pixel
 
     def __enter__(self):
-        print "Enter"
+        print("Enter")
         return self
 
     def __exit__(self, type, value, traceback):
+        ## NOTE ATER DINNER: ERROR WITH THE PIL TOSTRING, NOT GETTING TORN DOWN PROPERLY
+        ## (With statements automatically call this on exception?)
+        print("Exit was called, releasing ISOs")
         for iso in self.iso:
             try:
                 iso.cancel()
             except:
-                print "unable to cancel"
-        print "Releasing interface"
+                print("unable to cancel")
+        print("Releasing interface")
         self.devh.releaseInterface(0)
-        print "Closing device handler"
+        print("Closing device handler")
         self.devh.close()
-        print "Exiting context"
+        print("Exiting context")
         self.cont.exit()
         pass
 
@@ -114,18 +124,19 @@ class Utv007(object):
         In this routine we find the start of first of the two interlaced images, and then we start processing
     """
     def build_images(self, buffer_list, setup_list):
-        packets = [self.buffer_list[i][:int(self.setup_list[i]['actual_length'])] for i in xrange(len(self.buffer_list))]
+        packets = [self.buffer_list[i][:int(self.setup_list[i]['actual_length'])] for i in range(len(self.buffer_list))]
         for packet in packets:
             if len(packet) == 0:
                 continue
 
-            for s_packet in [packet[:len(packet)/3], packet[len(packet)/3:2*len(packet)/3], packet[2*len(packet)/3:len(packet)]]:
-                if ord(s_packet[0]) != 0x88:
+            for s_packet in [packet[:old_div(len(packet),3)], packet[old_div(len(packet),3):old_div(2*len(packet),3)], packet[old_div(2*len(packet),3):len(packet)]]:
+                #print(s_packet[0])
+                if s_packet[0] != 0x88:
                     continue
 
-                n_img      = ord(s_packet[1])
-                n_s_packet = ((ord(s_packet[2]) & 0x0f)<< 8) | (ord(s_packet[3]))
-                n_toggle   = (((ord(s_packet[2]) & 0xf0) >> 7) == 0)
+                n_img      = s_packet[1]
+                n_s_packet = ((s_packet[2] & 0x0f)<< 8) | (s_packet[3])
+                n_toggle   = (((s_packet[2] & 0xf0) >> 7) == 0)
 
                 n = (n_s_packet + int(not n_toggle) * 360) * 960
                 self.framebuffer[n: n + 960] = s_packet[4:1024-60]
@@ -152,7 +163,7 @@ from time import strftime
 try:
     import cv2
 except:
-    print "OpenCV 2 Not Available. Video can not be recorded."
+    print("OpenCV 2 Not Available. Video can not be recorded.")
 
 quit_now = False
 screen   = None
@@ -162,7 +173,7 @@ renclock = pygame.time.Clock()
 camclock = pygame.time.Clock()
 
 def convert_pil(framebuffer):
-    yuyv = np.reshape(framebuffer, (480 * 720 * 2 / 4, 4))
+    yuyv = np.reshape(framebuffer, (old_div(480 * 720 * 2, 4), 4))
     together = np.vstack((yuyv[:,0], yuyv[:,1], yuyv[:,3], yuyv[:,2], yuyv[:,1], yuyv[:,3])).T.reshape((480, 720 * 3))
     # deinterlace
     deinterlaced = np.zeros((480, 720 * 3), dtype='uint8')
@@ -172,7 +183,7 @@ def convert_pil(framebuffer):
     return im
 
 def display_frame(im):
-    surface = pygame.image.fromstring(im.tostring(), (720, 480), "RGB")
+    surface = pygame.image.fromstring(im.tobytes(), (720, 480), "RGB")
     screen.blit(surface, (0,0)) 
     
     font = pygame.font.Font(None, 36)
@@ -198,9 +209,9 @@ class ListenThread(threading.Thread):
         self._stop.set()
 
     def run(self):
-        for i in xrange(20):
+        for i in range(20):
             self.utv.do_iso2()
-        while not self._stop.isSet():
+        while not self._stop.is_set():
             self.utv.handle_ev()
 
 def signal_handler(signal, frame):
@@ -231,7 +242,8 @@ def main():
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    quit_now = True
+                    #quit_now = True
+                    pass
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_r:
                         if record is None:
@@ -240,7 +252,7 @@ def main():
                             filename = strftime("Recording %Y-%m-%d %H.%M.%S.mov")
                             record = cv2.VideoWriter(filename, fourcc, 20.0, (720, 480))
                         else:
-                            print "finishing up the recording"
+                            print("finishing up the recording")
                             record.release()
                             record = None
                     elif event.key == pygame.K_SPACE:
@@ -248,12 +260,13 @@ def main():
                         pygame.display.flip()
                         filename = strftime("Snapshot %Y-%m-%d %H.%M.%S.jpg")
                         im.save(filename)
-                        print "Saving snapshot as %s" % filename
-
+                        print("Saving snapshot as %s" % filename)
+        print("exited with")
         utv.stop = True
         lt.stop()
         if record is not None:
             record.release()
+        print("stopping...")
         # exit()
 
 if __name__=="__main__":
