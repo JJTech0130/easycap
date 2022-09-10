@@ -1,9 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) 2013 Federico Ruiz Ugalde
 # Copyright (c) 2014 Kevin Kwok
+# Copyright (c) 2022 JJTech0130
 #
 # Author: Federico Ruiz-Ugalde <memeruiz at gmail dot com>
 # Author: Kevin Kwok <antimatter15@gmail.com>
+# Author: JJTech0130 <jjtech@jjtech.dev>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,17 +20,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import division
-from __future__ import print_function
-from builtins import hex
-from builtins import range
-from builtins import object
+# TODO: Convert old division to new
 from past.utils import old_div
-import usb1 as usb
-from protocol import p_init, p5
-from protocol import *
+
 from time import sleep
+
+import usb1 as usb
 import pygame
+
+from protocol import *
+
 
 EASYCAP_VID = 0x1B71
 EASYCAP_PID = 0x3002
@@ -36,7 +37,7 @@ EASYCAP_PID = 0x3002
 EASYCAP_INTERFACE = 0
 
 
-class Utv007(object):
+class EasyCAP:
     def __init__(self):
         # This will select the device to use immidately,
         # but we don't want to claim it until the user uses the with
@@ -59,12 +60,6 @@ class Utv007(object):
         if not self.device:
             raise Exception("No EasyCap found")
 
-        # packet related:
-        self.expected_toggle = True
-        self.expected_n_s_packet = 0
-        self.expected_n_img = 0
-        self.start_frame = True
-        self.n_packets = 0
         self.stop = False
         self.iso = []
         self.framebuffer = bytearray(720 * 480 * 2)  # 2 bytes per pixel
@@ -94,7 +89,7 @@ class Utv007(object):
 
     def __exit__(self, type, value, traceback):
         # TODO: Threads are not being killed properly
-        
+
         print("Exit was called, releasing ISOs")
         for iso in self.iso:
             try:
@@ -117,7 +112,7 @@ class Utv007(object):
         iso.submit()
         self.iso.append(iso)
 
-    def handle_ev(self):
+    def handle_usb_events(self):
         self.usb_context.handleEvents()
 
     """ 
@@ -241,7 +236,7 @@ class ListenThread(threading.Thread):
         for i in range(20):
             self.utv.do_iso2()
         while not self._stop.is_set():
-            self.utv.handle_ev()
+            self.utv.handle_usb_events()
 
 
 def signal_handler(signal, frame):
@@ -257,7 +252,7 @@ def main():
     screen = pygame.display.set_mode(size)
     pygame.display.set_caption("Fushicai EasyCAP utv007")
 
-    with Utv007() as utv:
+    with EasyCAP() as utv:
         lt = ListenThread(utv)
         lt.start()
 
