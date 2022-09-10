@@ -23,8 +23,6 @@
 # TODO: Convert old division to new
 from past.utils import old_div
 
-from time import sleep
-
 import usb1 as usb
 import pygame
 
@@ -66,12 +64,6 @@ class EasyCAP:
 
     def __enter__(self):
         self.device_handle = self.device.open()
-
-        # Try to detach any kernel drivers
-        while self.device_handle.kernelDriverActive(EASYCAP_INTERFACE):
-            print("Detaching kernel driver")
-            self.device_handle.detachKernelDriver(EASYCAP_INTERFACE)
-            sleep(0.5)
 
         print("Claiming interface")
         self.device_handle.claimInterface(EASYCAP_INTERFACE)
