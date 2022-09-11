@@ -23,7 +23,8 @@
 import usb1 as usb
 import threading
 
-from protocol import *
+#from protocol import *
+import protocol
 
 
 EASYCAP_VID = 0x1B71
@@ -75,11 +76,11 @@ class EasyCAP:
         self.device_handle.claimInterface(EASYCAP_INTERFACE)
 
         # Preinitialize
-        run_protocol(p_preinit, self.device_handle)
+        protocol.run_protocol(protocol.p_preinit, self.device_handle)
 
         # Initialize
-        run_protocol(p_init, self.device_handle)
-        run_protocol(p5, self.device_handle)
+        protocol.run_protocol(protocol.p_init, self.device_handle)
+        protocol.run_protocol(protocol.p5, self.device_handle)
 
         # Enable the Alternative Mode (Used for streaming?)
         self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
