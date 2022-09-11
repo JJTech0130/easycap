@@ -99,6 +99,8 @@ def main():
                         filename = strftime("Snapshot %Y-%m-%d %H.%M.%S.jpg")
                         im.save(filename)
                         print("Saving snapshot as %s" % filename)
+                    elif event.key == pygame.K_i:
+                        utv.test()
         print("exited with")
         if record is not None:
             record.release()

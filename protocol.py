@@ -231,6 +231,5 @@ def begin_capture(device_handle):
 		[ USBTV_BASE + 0x0159, 0x0006 ],
 		[ USBTV_BASE + 0x015d, 0x0000 ],
     ]
+    
     set_registers(device_handle, SETUP)
-    set_standard(device_handle, "NTSC")
-    set_input(device_handle, "Composite")

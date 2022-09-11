@@ -74,14 +74,10 @@ class EasyCAP:
         self.device_handle = self.device.open()
 
         self.device_handle.claimInterface(EASYCAP_INTERFACE)
-        
-        protocol.begin_capture(self.device_handle)
-        # Preinitialize
-        #protocol.run_protocol(protocol.p_preinit, self.device_handle)
 
-        # Initialize
-        #protocol.run_protocol(protocol.p_init, self.device_handle)
-        #protocol.run_protocol(protocol.p5, self.device_handle)
+        protocol.begin_capture(self.device_handle)
+        protocol.set_standard(self.device_handle, "NTSC")
+        protocol.set_input(self.device_handle, "Composite")
 
         # Enable the Alternative Mode (Used for streaming?)
         self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
@@ -184,3 +180,6 @@ class EasyCAP:
                 transfer.submit()
             except usb.USBError as e:
                 print("Unable to submit transfer", e)
+
+    def test(self):
+        protocol.set_input(self.device_handle, "S-Video")
