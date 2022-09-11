@@ -20,11 +20,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-# TODO: Convert old division to new
-from past.utils import old_div
-
 import usb1 as usb
 import pygame
+import threading
 
 from protocol import *
 
@@ -62,11 +60,10 @@ class EasyCAP:
         if not self.device:
             raise Exception("No EasyCap found")
 
-        self.stop = False
         self.iso = []
         self.framebuffer = bytearray(EASYCAP_FRAME_SIZE)
 
-        self.test = 0
+        self.ready = False
 
     def __enter__(self):
         self.device_handle = self.device.open()
@@ -83,29 +80,39 @@ class EasyCAP:
         # Enable the Alternative Mode (Used for streaming?)
         self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
 
+        threading.Thread(target=self.kickoff).start()
+
+        self.ready = True
         return self
 
     def __exit__(self, type, value, traceback):
         # TODO: Threads are not being killed properly
+        self.ready = False
 
-        print("Exit was called, releasing ISOs")
+        # Try and release any pending transfers
         for iso in self.iso:
             try:
                 iso.cancel()
             except:
-                print("unable to cancel")
-        print("Releasing interface")
-        self.device_handle.releaseInterface(0)
-        print("Closing device handler")
+                pass
+        
+        self.device_handle.releaseInterface(EASYCAP_INTERFACE)
         self.device_handle.close()
-        print("Exiting context")
         self.usb_context.exit()
-        pass
-
-    def do_iso2(self):
+    
+    # This function (which runs in it's own thread) will
+    # kick off the 20 iso transfers, then handle all pending USB events
+    # until we're told to stop
+    def kickoff(self):
+        for i in range(20):
+            self.transfer_iso()
+        while self.ready:
+            self.handle_usb_events()
+    
+    def transfer_iso(self):
         iso = self.device_handle.getTransfer(iso_packets=8)
         iso.setIsochronous(
-            0x81, buffer_or_len=0x6000, callback=self.callback2, timeout=1000
+            0x81, buffer_or_len=0x6000, callback=self.iso_ready, timeout=1000
         )
         iso.submit()
         self.iso.append(iso)
@@ -116,8 +123,8 @@ class EasyCAP:
     def build_images(self, buffer_list, setup_list):
         # Trim buffers down to their "actual length"
         packets = [
-            self.buffer_list[i][: int(self.setup_list[i]["actual_length"])]
-            for i in range(len(self.buffer_list))
+            buffer_list[i][: int(setup_list[i]["actual_length"])]
+            for i in range(len(buffer_list))
         ]
         for packet in packets:
             if len(packet) == 0:
@@ -159,14 +166,16 @@ class EasyCAP:
                 if interlace == 1 and packet_counter == 359:
                     camclock.tick()
 
-    def callback2(self, transfer):
-        self.buffer_list = transfer.getISOBufferList()
-        self.setup_list = transfer.getISOSetupList()
-        self.status = transfer.getStatus()
-        self.build_images(self.buffer_list, self.setup_list)
+    def iso_ready(self, transfer):
+        buffer_list = transfer.getISOBufferList()
+        setup_list = transfer.getISOSetupList()
+        self.build_images(buffer_list, setup_list)
 
-        if not self.stop:
+        # Because this is a callback, we need to make sure that
+        # we don't try and submit if we're not in a ready state
+        if self.ready:
             try:
+                # Submits the transfer, it will get called again
                 transfer.submit()
             except usb.USBError as e:
                 print("Unable to submit transfer", e)
@@ -207,7 +216,7 @@ def convert_pil(framebuffer):
 
 
 def display_frame(im):
-    surface = pygame.image.fromstring(im.tobytes(), (720, 480), "RGB")
+    surface = pygame.image.fromstring(im.tobytes(), im.size, "RGB")
     screen.blit(surface, (0, 0))
 
     font = pygame.font.Font(None, 36)
@@ -219,24 +228,6 @@ def display_frame(im):
     # print "fps", renclock.get_fps()
     pygame.display.flip()
     renclock.tick()
-
-
-# https://www.mail-archive.com/fx2lib-devel@lists.sourceforge.net/msg00048.html
-# http://stackoverflow.com/questions/323972/is-there-any-way-to-kill-a-thread-in-python
-class ListenThread(threading.Thread):
-    def __init__(self, utv):
-        self.utv = utv
-        threading.Thread.__init__(self)
-        self._stop = threading.Event()
-
-    def stop(self):
-        self._stop.set()
-
-    def run(self):
-        for i in range(20):
-            self.utv.do_iso2()
-        while not self._stop.is_set():
-            self.utv.handle_usb_events()
 
 
 def signal_handler(signal, frame):
@@ -252,9 +243,6 @@ def main():
     pygame.display.set_caption("Fushicai EasyCAP utv007")
 
     with EasyCAP() as utv:
-        lt = ListenThread(utv)
-        lt.start()
-
         while not quit_now:
             im = convert_pil(utv.framebuffer)
             display_frame(im)
@@ -267,13 +255,14 @@ def main():
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    # quit_now = True
-                    pass
+                    quit_now = True
+                    #pass
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_r:
                         if record is None:
                             # http://stackoverflow.com/questions/10605163/opencv-videowriter-under-osx-producing-no-output
-                            fourcc = cv2.cv.CV_FOURCC("m", "p", "4", "v")
+                            fourcc = cv2.VideoWriter.fourcc("m", "p", "4", "v")
+                            #fourcc = cv2.cv.CV_FOURCC("m", "p", "4", "v")
                             filename = strftime("Recording %Y-%m-%d %H.%M.%S.mov")
                             record = cv2.VideoWriter(filename, fourcc, 20.0, (720, 480))
                         else:
@@ -289,12 +278,8 @@ def main():
                         im.save(filename)
                         print("Saving snapshot as %s" % filename)
         print("exited with")
-        utv.stop = True
-        lt.stop()
         if record is not None:
             record.release()
-        print("stopping...")
-        # exit()
 
 
 if __name__ == "__main__":
