@@ -74,13 +74,14 @@ class EasyCAP:
         self.device_handle = self.device.open()
 
         self.device_handle.claimInterface(EASYCAP_INTERFACE)
-
+        
+        protocol.begin_capture(self.device_handle)
         # Preinitialize
-        protocol.run_protocol(protocol.p_preinit, self.device_handle)
+        #protocol.run_protocol(protocol.p_preinit, self.device_handle)
 
         # Initialize
-        protocol.run_protocol(protocol.p_init, self.device_handle)
-        protocol.run_protocol(protocol.p5, self.device_handle)
+        #protocol.run_protocol(protocol.p_init, self.device_handle)
+        #protocol.run_protocol(protocol.p5, self.device_handle)
 
         # Enable the Alternative Mode (Used for streaming?)
         self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
@@ -170,7 +171,7 @@ class EasyCAP:
                 if interlace == 1 and packet_counter == 359 and self.frame_handler:
                     self.frame_handler()
 
-    def iso_ready(self, transfer):
+    def iso_ready(self, transfer: usb.USBTransfer):
         buffer_list = transfer.getISOBufferList()
         setup_list = transfer.getISOSetupList()
         self.build_images(buffer_list, setup_list)
