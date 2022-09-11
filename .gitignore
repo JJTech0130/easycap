@@ -33,3 +33,9 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+# Test output
+*.mov
+*.jpg
+
+settings.json
