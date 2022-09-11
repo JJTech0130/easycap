@@ -3,6 +3,8 @@ from PIL import Image
 import signal
 from time import strftime
 import pygame
+import pyaudio
+
 from easycap import *
 
 try:
@@ -13,7 +15,18 @@ except:
 quit_now = False
 screen = None
 record = None
+mute = False
 
+p = pyaudio.PyAudio()
+
+stream = p.open(
+    format=pyaudio.paInt16,
+    channels=2,
+    rate=44100,
+    output=True,
+    # If the audio output is overly staticy, try tuning this value.
+    frames_per_buffer=2048,
+)
 renclock = pygame.time.Clock()
 camclock = pygame.time.Clock()
 
@@ -38,10 +51,10 @@ def display_frame(im, utv):
     screen.blit(surface, (0, 0))
 
     font = pygame.font.Font(None, 36)
-    font2 = pygame.font.Font(None, 20)
+    #font2 = pygame.font.Font(None, 20)
     text = font.render("FPS: %1.1f" % (camclock.get_fps()), 1, (190, 10, 10))
-    framenum = font2.render("Frame: %d" % (utv.frame_counter), 1, (190, 10, 10))
-    screen.blit(framenum, (10, 30))
+    #framenum = font2.render("Frame: %d" % (utv.frame_counter), 1, (190, 10, 10))
+    #screen.blit(framenum, (10, 30))
     screen.blit(text, (10, 10))
     if record is not None:
         text = font.render("Recording", 1, (190, 10, 10))
@@ -50,6 +63,10 @@ def display_frame(im, utv):
     pygame.display.flip()
     renclock.tick()
 
+def handle_audio(buffer):
+    global mute
+    if not mute:
+        stream.write(buffer)
 
 def signal_handler(signal, frame):
     global quit_now
@@ -59,12 +76,14 @@ def signal_handler(signal, frame):
 def main():
     signal.signal(signal.SIGINT, signal_handler)
     pygame.init()
-    global screen, quit_now, record
+    global screen, quit_now, record, mute
     screen = pygame.display.set_mode((EASYCAP_VIDEO_WIDTH, EASYCAP_VIDEO_HEIGHT))
     pygame.display.set_caption("Fushicai EasyCAP utv007")
 
     with EasyCAP() as utv:
         utv.frame_handler = camclock.tick
+        utv.audio_handler = handle_audio
+
         while not quit_now:
             im = convert_pil(utv.framebuffer)
             display_frame(im, utv)
@@ -99,8 +118,8 @@ def main():
                         filename = strftime("Snapshot %Y-%m-%d %H.%M.%S.jpg")
                         im.save(filename)
                         print("Saving snapshot as %s" % filename)
-                    elif event.key == pygame.K_i:
-                        utv.test()
+                    elif event.key == pygame.K_m:
+                        mute = not mute
         print("exited with")
         if record is not None:
             record.release()

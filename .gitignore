@@ -39,5 +39,6 @@ nosetests.xml
 *.jpg
 
 settings.json
+launch.json
 
 linux/

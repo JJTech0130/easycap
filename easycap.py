@@ -67,6 +67,11 @@ class EasyCAP:
 
         # This function is called when a new frame is ready
         self.frame_handler = None
+        # This function is called when a new audio sample is ready
+        self.audio_handler = None
+
+        # Audio capture can be disabled to improve video performance
+        self.audio_enabled = True
 
         self.frame_counter = 0
 
@@ -79,10 +84,14 @@ class EasyCAP:
         protocol.set_standard(self.device_handle, "NTSC")
         protocol.set_input(self.device_handle, "Composite")
 
+        if self.audio_enabled:
+            self.begin_audio_capture()
         # Enable the Alternative Mode (Used for streaming?)
         self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
 
         threading.Thread(target=self.kickoff).start()
+        #if self.audio_enabled:
+        #    self.begin_audio_capture()
 
         self.ready = True
         return self
@@ -96,6 +105,9 @@ class EasyCAP:
                 iso.cancel()
             except:
                 pass
+
+        if self.audio_enabled:
+            self.end_audio_capture()
 
         self.device_handle.releaseInterface(EASYCAP_INTERFACE)
         self.device_handle.close()
@@ -181,6 +193,23 @@ class EasyCAP:
             except usb.USBError as e:
                 print("Unable to submit transfer", e)
 
-    def test(self):
-        protocol.begin_audio_capture(self.device_handle)
-        #protocol.set_input(self.device_handle, "S-Video")
+    def _audio_callback(self, transfer: usb.USBTransfer):
+        if self.audio_handler:
+            audio_buffer = transfer.getBuffer()[4:-12]
+            self.audio_handler(bytes(audio_buffer))
+
+        if self.ready:
+            try:
+                transfer.submit()
+            except usb.USBError as e:
+                print("Unable to submit transfer", e)
+
+    def begin_audio_capture(self):
+        protocol.enable_audio(self.device_handle)
+
+        audio_transfer = self.device_handle.getTransfer()
+        audio_transfer.setBulk(0x83, buffer_or_len=256, callback=self._audio_callback, timeout=1000)
+        audio_transfer.submit()
+
+    def end_audio_capture(self):
+        protocol.disable_audio(self.device_handle)
