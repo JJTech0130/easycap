@@ -34,6 +34,10 @@ EASYCAP_PID = 0x3002
 
 EASYCAP_INTERFACE = 0
 
+EASYCAP_VIDEO_WIDTH = 720
+EASYCAP_VIDEO_HEIGHT = 480
+EASYCAP_FRAME_SIZE = EASYCAP_VIDEO_WIDTH * EASYCAP_VIDEO_HEIGHT * 2  # 2 bytes per pixel
+
 
 class EasyCAP:
     def __init__(self):
@@ -60,21 +64,23 @@ class EasyCAP:
 
         self.stop = False
         self.iso = []
-        self.framebuffer = bytearray(720 * 480 * 2)  # 2 bytes per pixel
+        self.framebuffer = bytearray(EASYCAP_FRAME_SIZE)
+
+        self.test = 0
 
     def __enter__(self):
         self.device_handle = self.device.open()
 
-        print("Claiming interface")
         self.device_handle.claimInterface(EASYCAP_INTERFACE)
 
-        print("Preinit")
+        # Preinitialize
         run_protocol(p_preinit, self.device_handle)
-        print("Init")
+
+        # Initialize
         run_protocol(p_init, self.device_handle)
         run_protocol(p5, self.device_handle)
 
-        print("Set Altsetting to 1")
+        # Enable the Alternative Mode (Used for streaming?)
         self.device_handle.setInterfaceAltSetting(EASYCAP_INTERFACE, 1)
 
         return self
@@ -107,25 +113,8 @@ class EasyCAP:
     def handle_usb_events(self):
         self.usb_context.handleEvents()
 
-    """ 
-        buffer_list is a list that contains around 8 packets inside, each of this packets contains 3 smaller packets inside
-        The first four bytes of this s_packets are special:
-        1) 0x88 always
-        2) frame counter
-        3) 8bit: toogle frame bit (for interlacing), 7-0bits packet counter
-        4) packet counter
-        With frame counter one can know if we are loosing frames
-        With the packet counter one can know if we have incomplete frames
-        With the toogle frame bit it is possible to generate the correct complete progressive image
-        This four bytes must be removed from the image data.
-        The last 60 bytes are black filled (for synchronization?) and must be removed
-        Each s_packet is 1024 long but once we remove this bytes the data payload is 1024-4-60=960 bytes long.
-        If packet starts with 0x00 instead of 0x88, it means it is empty and to be ignored
-
-        In this routine we find the start of first of the two interlaced images, and then we start processing
-    """
-
     def build_images(self, buffer_list, setup_list):
+        # Trim buffers down to their "actual length"
         packets = [
             self.buffer_list[i][: int(self.setup_list[i]["actual_length"])]
             for i in range(len(self.buffer_list))
@@ -134,25 +123,41 @@ class EasyCAP:
             if len(packet) == 0:
                 continue
 
-            for s_packet in [
-                packet[: old_div(len(packet), 3)],
-                packet[old_div(len(packet), 3) : old_div(2 * len(packet), 3)],
-                packet[old_div(2 * len(packet), 3) : len(packet)],
-            ]:
-                # print(s_packet[0])
-                if s_packet[0] != 0x88:
+            # Split the packet into 3 smaller packets
+            sub_len = len(packet) // 3
+            sub_packets = [packet[sub_len * i : sub_len * (i + 1)] for i in range(3)]
+            for sub_packet in sub_packets:
+                # First byte is always 0x88
+                if sub_packet[0] != 0x88:
+                    # Skip empty/invalid packets
                     continue
 
-                n_img = s_packet[1]
-                n_s_packet = ((s_packet[2] & 0x0F) << 8) | (s_packet[3])
-                n_toggle = ((s_packet[2] & 0xF0) >> 7) == 0
+                # This could be used to detect dropped frames
+                frame_counter = sub_packet[1]
 
-                n = (n_s_packet + int(not n_toggle) * 360) * 960
-                self.framebuffer[n : n + 960] = s_packet[4 : 1024 - 60]
+                # The packet counter is constructed a bit weirdly
+                # The first bit is the interlace bit, and the 2nd-4th bits are ignored
+                # The 5th-8th bits form the first 4 bits of the packet counter
+                # Which are then OR'd with the 3rd byte of the packet
+                # (Only the last bit of the sub_packet[2] is used, as it only goes to 360...)
+                packet_counter = ((sub_packet[2] & 0x0F) << 8) | sub_packet[3]
+                interlace = (sub_packet[2] & 0xF0) >> 7  # opposite of original
 
-                if n_toggle == False and n_s_packet == 359:
+                # Add 360 to the packet number if the interlace bit is set,
+                # So that it turns it into a continuous range 0-720
+                # Then multiply by 960 (the amount of data in each packet)
+                offset = (packet_counter + (interlace * 360)) * 960
+
+                # Remove the first 4 bytes and the last 60 bytes (which are padding)
+                frame_data = sub_packet[4:-60]
+                # Copy the data into the framebuffer
+                self.framebuffer[offset : offset + 960] = frame_data
+
+                # 360 packets * 2 times (interlaced) * 960 bytes per packet = 691200 = 720 * 480 * 2
+
+                # We've drawn a whole frame, so tell Pygame so it can calculate the FPS
+                if interlace == 1 and packet_counter == 359:
                     camclock.tick()
-                    # self.framebuffer = bytearray(720 * 480 * 2)
 
     def callback2(self, transfer):
         self.buffer_list = transfer.getISOBufferList()
@@ -161,7 +166,10 @@ class EasyCAP:
         self.build_images(self.buffer_list, self.setup_list)
 
         if not self.stop:
-            transfer.submit()
+            try:
+                transfer.submit()
+            except usb.USBError as e:
+                print("Unable to submit transfer", e)
 
 
 import numpy as np
@@ -184,7 +192,7 @@ camclock = pygame.time.Clock()
 
 
 def convert_pil(framebuffer):
-    yuyv = np.reshape(framebuffer, (old_div(480 * 720 * 2, 4), 4))
+    yuyv = np.reshape(framebuffer, ((EASYCAP_FRAME_SIZE // 4), 4))
     together = np.vstack(
         (yuyv[:, 0], yuyv[:, 1], yuyv[:, 3], yuyv[:, 2], yuyv[:, 1], yuyv[:, 3])
     ).T.reshape((480, 720 * 3))
@@ -240,8 +248,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     pygame.init()
     global screen, quit_now, record
-    size = (720, 480)
-    screen = pygame.display.set_mode(size)
+    screen = pygame.display.set_mode((EASYCAP_VIDEO_WIDTH, EASYCAP_VIDEO_HEIGHT))
     pygame.display.set_caption("Fushicai EasyCAP utv007")
 
     with EasyCAP() as utv:
