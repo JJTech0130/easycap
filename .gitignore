@@ -39,3 +39,5 @@ nosetests.xml
 *.jpg
 
 settings.json
+
+linux/
