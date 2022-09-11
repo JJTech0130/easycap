@@ -33,12 +33,15 @@ def convert_pil(framebuffer):
     return im
 
 
-def display_frame(im):
+def display_frame(im, utv):
     surface = pygame.image.fromstring(im.tobytes(), im.size, "RGB")
     screen.blit(surface, (0, 0))
 
     font = pygame.font.Font(None, 36)
+    font2 = pygame.font.Font(None, 20)
     text = font.render("FPS: %1.1f" % (camclock.get_fps()), 1, (190, 10, 10))
+    framenum = font2.render("Frame: %d" % (utv.frame_counter), 1, (190, 10, 10))
+    screen.blit(framenum, (10, 30))
     screen.blit(text, (10, 10))
     if record is not None:
         text = font.render("Recording", 1, (190, 10, 10))
@@ -64,7 +67,7 @@ def main():
         utv.frame_handler = camclock.tick
         while not quit_now:
             im = convert_pil(utv.framebuffer)
-            display_frame(im)
+            display_frame(im, utv)
 
             if record is not None and record.isOpened():
                 # maybe we should use opencv/highgui instead of pygame

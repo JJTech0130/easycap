@@ -67,6 +67,8 @@ class EasyCAP:
         # This function is called when a new frame is ready
         self.frame_handler = None
 
+        self.frame_counter = 0
+
     def __enter__(self):
         self.device_handle = self.device.open()
 
@@ -88,7 +90,6 @@ class EasyCAP:
         return self
 
     def __exit__(self, type, value, traceback):
-        # TODO: Threads are not being killed properly
         self.ready = False
 
         # Try and release any pending transfers
@@ -142,7 +143,7 @@ class EasyCAP:
                     continue
 
                 # This could be used to detect dropped frames
-                frame_counter = sub_packet[1]
+                self.frame_counter = sub_packet[1]
 
                 # The packet counter is constructed a bit weirdly
                 # The first bit is the interlace bit, and the 2nd-4th bits are ignored
