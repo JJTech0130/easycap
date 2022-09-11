@@ -1,4 +1,3 @@
-from __future__ import print_function
 # Copyright (c) 2013 Federico Ruiz Ugalde
 # Author: Federico Ruiz-Ugalde <memeruiz at gmail dot com>
 #
@@ -231,5 +230,60 @@ def begin_capture(device_handle):
 		[ USBTV_BASE + 0x0159, 0x0006 ],
 		[ USBTV_BASE + 0x015d, 0x0000 ],
     ]
-    
+
     set_registers(device_handle, SETUP)
+
+
+## AUDIO
+
+import pyaudio
+
+p = pyaudio.PyAudio()
+
+stream = p.open(format=pyaudio.paInt16,
+                channels=2,
+                rate=44100,
+                output=True)
+
+def audio_callback(transfer: usb.USBTransfer):
+    buffer = transfer.getBuffer()
+    
+    stream.write(bytes(buffer[4:-12]))
+
+    transfer.submit()
+
+
+def begin_audio_capture(device_handle: usb.USBDeviceHandle):
+    SETUP = [
+	    # These seem to enable the device.
+        [ USBTV_BASE + 0x0008, 0x0001 ],
+        [ USBTV_BASE + 0x01d0, 0x00ff ],
+        [ USBTV_BASE + 0x01d9, 0x0002 ],
+
+		[ USBTV_BASE + 0x01da, 0x0013 ],
+		[ USBTV_BASE + 0x01db, 0x0012 ],
+		[ USBTV_BASE + 0x01e9, 0x0002 ],
+		[ USBTV_BASE + 0x01ec, 0x006c ],
+		[ USBTV_BASE + 0x0294, 0x0020 ],
+		[ USBTV_BASE + 0x0255, 0x00cf ],
+		[ USBTV_BASE + 0x0256, 0x0020 ],
+		[ USBTV_BASE + 0x01eb, 0x0030 ],
+		[ USBTV_BASE + 0x027d, 0x00a6 ],
+		[ USBTV_BASE + 0x0280, 0x0011 ],
+		[ USBTV_BASE + 0x0281, 0x0040 ],
+		[ USBTV_BASE + 0x0282, 0x0011 ],
+		[ USBTV_BASE + 0x0283, 0x0040 ],
+		[ 0xf891, 0x0010 ],
+
+		# this sets the input from composite
+		[ USBTV_BASE + 0x0284, 0x00aa ],
+	]
+
+    transfer = device_handle.getTransfer(1)
+    # Note that this is a bulk transfer, not an isochronous transfer.
+    # Orignally this had a *really* large buffer (20480), but it wasn't getting filled...
+    transfer.setBulk(0x83, buffer_or_len=256, callback=audio_callback, timeout=1000)
+
+    set_registers(device_handle, SETUP)
+    
+    transfer.submit()

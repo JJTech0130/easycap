@@ -182,4 +182,5 @@ class EasyCAP:
                 print("Unable to submit transfer", e)
 
     def test(self):
-        protocol.set_input(self.device_handle, "S-Video")
+        protocol.begin_audio_capture(self.device_handle)
+        #protocol.set_input(self.device_handle, "S-Video")
