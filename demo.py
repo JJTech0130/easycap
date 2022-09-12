@@ -16,6 +16,7 @@ quit_now = False
 screen = None
 record = None
 mute = False
+fps = True
 
 p = pyaudio.PyAudio()
 
@@ -30,43 +31,76 @@ stream = p.open(
 renclock = pygame.time.Clock()
 camclock = pygame.time.Clock()
 
+# Converts a YUYV framebuffer into a YCbCr framebuffer
+def yuyv_to_ycbcr(framebuffer):
+    # Group into 4 byte chunks (-1 means "until the end")
+    yuyv = np.reshape(framebuffer, (-1, 4))
 
-def convert_pil(framebuffer):
-    yuyv = np.reshape(framebuffer, ((EASYCAP_FRAME_SIZE // 4), 4))
-    together = np.vstack(
+    # Y1 U Y2 V
+    # to
+    # Y1 U V Y2 U V
+    ycbcr = np.column_stack((
         (yuyv[:, 0], yuyv[:, 1], yuyv[:, 3], yuyv[:, 2], yuyv[:, 1], yuyv[:, 3])
-    ).T.reshape((480, 720 * 3))
-    # deinterlace
-    deinterlaced = np.zeros((480, 720 * 3), dtype="uint8")
-    deinterlaced[1::2, :] = together[:240, :]
-    deinterlaced[::2, :] = together[240:, :]
+    ))
+
+    return ycbcr.flatten()
+
+# Deinterlaces the framebuffer
+# This is a simple "weave" deinterlacing algorithm
+def deinterlace(framebuffer, size = (720, 480)):
+    # It's easier to work with when it's reshaped into a 2D array
+    framebuffer = np.reshape(framebuffer, (size[1], size[0] * 3))
+    # Must have a second framebuffer, because we do the deinterlacing in 2 passes
+    output = np.zeros((size[1], size[0] * 3), dtype="uint8")
+
+    half_height = size[1] // 2
+    half_height = 240
+    
+    # First 240 lines go to every other line, starting at line 1
+    output[1::2, :] = framebuffer[:half_height, :]
+    # Last 240 lines go to every other line, starting at line 0
+    output[::2, :] = framebuffer[half_height:, :]
+    
+    return output.flatten()
+
+# Converts the raw framebuffer into a PIL image
+def frame(framebuffer, size = (720, 480)):
+    framebuffer = yuyv_to_ycbcr(framebuffer)
+    
+    framebuffer = deinterlace(framebuffer, size)
+    
     im = Image.frombuffer(
-        "YCbCr", (720, 480), deinterlaced.flatten(), "raw", "YCbCr", 0, 1
-    ).convert("RGB")
+        "YCbCr", size, framebuffer, "raw", "YCbCr", 0, 1
+    )
+    im = im.convert("RGB")
+    
     return im
 
-
-def display_frame(im, utv):
-    surface = pygame.image.fromstring(im.tobytes(), im.size, "RGB")
+def display_frame(im: Image.Image, mute: bool, fps: bool, fps_clock: pygame.time.Clock):
+    surface = pygame.image.fromstring(im.tobytes(), im.size, im.mode)
     screen.blit(surface, (0, 0))
 
-    font = pygame.font.Font(None, 36)
-    #font2 = pygame.font.Font(None, 20)
-    text = font.render("FPS: %1.1f" % (camclock.get_fps()), 1, (190, 10, 10))
-    #framenum = font2.render("Frame: %d" % (utv.frame_counter), 1, (190, 10, 10))
-    #screen.blit(framenum, (10, 30))
-    screen.blit(text, (10, 10))
+    if fps:
+        font = pygame.font.Font(None, 36)
+        text = font.render("FPS: %1.1f" % (fps_clock.get_fps()), 1, (190, 10, 10))
+        screen.blit(text, (10, 10))
+    if mute:
+        font = pygame.font.Font(None, 20)
+        mute = font.render("MUTE", 1, (190, 10, 10))
+        screen.blit(mute, (10, 30))
     if record is not None:
+        font = pygame.font.Font(None, 36)
         text = font.render("Recording", 1, (190, 10, 10))
         screen.blit(text, (590, 450))
-    # print "fps", renclock.get_fps()
+
     pygame.display.flip()
-    renclock.tick()
+
 
 def handle_audio(buffer):
     global mute
     if not mute:
         stream.write(buffer)
+
 
 def signal_handler(signal, frame):
     global quit_now
@@ -76,7 +110,7 @@ def signal_handler(signal, frame):
 def main():
     signal.signal(signal.SIGINT, signal_handler)
     pygame.init()
-    global screen, quit_now, record, mute
+    global screen, quit_now, record, mute, fps
     screen = pygame.display.set_mode((EASYCAP_VIDEO_WIDTH, EASYCAP_VIDEO_HEIGHT))
     pygame.display.set_caption("Fushicai EasyCAP utv007")
 
@@ -85,14 +119,13 @@ def main():
         utv.audio_handler = handle_audio
 
         while not quit_now:
-            im = convert_pil(utv.framebuffer)
-            display_frame(im, utv)
+            display_frame(frame(utv.framebuffer), mute, fps, camclock)
 
-            if record is not None and record.isOpened():
-                # maybe we should use opencv/highgui instead of pygame
-                imcv = cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
-                # cv2.imshow('frame', imcv)
-                record.write(imcv)
+            #if record is not None and record.isOpened():
+            #    # maybe we should use opencv/highgui instead of pygame
+            #    imcv = cv2.cvtColor(np.asarray(), cv2.COLOR_RGB2BGR)
+            #    # cv2.imshow('frame', imcv)
+            #    record.write(imcv)
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -116,10 +149,12 @@ def main():
                         )  # flash the screen because its a snapshot
                         pygame.display.flip()
                         filename = strftime("Snapshot %Y-%m-%d %H.%M.%S.jpg")
-                        im.save(filename)
+                        #im.save(filename)
                         print("Saving snapshot as %s" % filename)
                     elif event.key == pygame.K_m:
                         mute = not mute
+                    elif event.key == pygame.K_f:
+                        fps = not fps
         print("exited with")
         if record is not None:
             record.release()
